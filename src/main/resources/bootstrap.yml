@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: identity-service
+  config:
+    import: optional:configserver:http://localhost:8888
+  cloud:
+    config:
+      fail-fast: false
+
