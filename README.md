@@ -39,6 +39,8 @@ mvn spring-boot:run
 
 Identity service will start on port **8081**.
 
+**Note:** The native access warning for JNA (used by Argon2) is automatically handled via JVM arguments in `pom.xml`. See `RUNNING.md` for IDE setup.
+
 ## Database
 
 Uses Flyway for database migrations. Migration files go in `src/main/resources/db/migration/`.

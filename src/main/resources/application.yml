@@ -9,13 +9,38 @@ spring:
       fail-fast: false
   # Local fallback configuration
   datasource:
-    url: jdbc:postgresql://localhost:5432/ecom_db
+    url: jdbc:postgresql://localhost:5432/ecom_iam
     username: postgres
     password: postgres
 
 # Local fallback configuration if Config Server is unavailable
 server:
   port: 8081
+
+# Password hashing configuration (Salt + Pepper with Argon2id)
+password:
+  # Pepper: Secret server-side value (NOT stored in database)
+  # - Length: No limit! Can be 32, 64, 128+ bytes for maximum security
+  # - Longer pepper = more entropy = stronger security
+  # - Recommended: 32-64 bytes (256-512 bits)
+  # - Generate with: openssl rand -base64 64  (for 64-byte pepper)
+  # - Set via environment variable: export PASSWORD_PEPPER="your-long-random-string"
+  pepper: ${PASSWORD_PEPPER:IpWqGDoY8MzVFGh36riE6Iy5jX4Ei4FOfx2TZeC6KhK5V1CotSUlNPfh+fAVRSP/87+JOXys54RCK8Ds+6ci1lbn7yGB174SEaQtZkYdFSvDuqckth3xDO1/7XgaFMNLXBRgl6OrC0jzU4G5e9I4ZKqT7adwj1f01XySV7ur4sU=}
+  
+argon2:
+  # Salt length: 8-64 bytes (16 bytes/128 bits is standard, 32 bytes/256 bits is excellent, 64 bytes is overkill)
+  # Current: 32 bytes (256 bits) - already MORE than industry standard!
+  # Going higher (e.g., 64 bytes) provides minimal security benefit but increases storage
+  salt-length: 32
+  
+  # Hash length: 16-64 bytes (32 bytes/256 bits is standard and sufficient)
+  # Current: 32 bytes (256 bits) - provides 2^256 possible hash values (practically unbreakable)
+  # Going higher provides no meaningful security benefit
+  hash-length: 32
+  
+  parallelism: 1 # Number of parallel threads (1-4 recommended based on CPU cores)
+  memory: 65536 # Memory cost in KB (64 MB) - good balance of security/performance
+  iterations: 5 # Number of iterations (5-10 recommended for production, 3 is minimum)
 
 logging:
   level:
