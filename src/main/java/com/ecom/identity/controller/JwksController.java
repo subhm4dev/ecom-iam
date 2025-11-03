@@ -1,7 +1,9 @@
 package com.ecom.identity.controller;
 
+import com.ecom.identity.service.JwksService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,8 +32,11 @@ import java.util.Map;
  * public keys. The private keys remain secure in the Identity service database.
  */
 @RestController
+@RequiredArgsConstructor
 @Tag(name = "JWKS", description = "JSON Web Key Set endpoint for JWT verification")
 public class JwksController {
+
+    private final JwksService jwksService;
 
     /**
      * Get JSON Web Key Set (JWKS)
@@ -48,6 +53,7 @@ public class JwksController {
      *       "kty": "RSA",
      *       "kid": "key-1",
      *       "use": "sig",
+     *       "alg": "RS256",
      *       "n": "...",
      *       "e": "AQAB"
      *     }
@@ -64,13 +70,8 @@ public class JwksController {
         security = {}
     )
     public ResponseEntity<Map<String, Object>> getJwks() {
-        // TODO: Implement JWKS endpoint
-        // 1. Call JwksService.getJwks() to get active keys
-        // 2. Convert JwkKey entities to JWKS JSON format (RFC 7517)
-        // 3. Return Map containing "keys" array with public key information
-        // 4. Include: kty (RSA), kid, use (sig), n (modulus), e (exponent)
-        // 5. Only include non-expired keys
-        return ResponseEntity.ok(null);
+        Map<String, Object> jwks = jwksService.getJwks();
+        return ResponseEntity.ok(jwks);
     }
 }
 

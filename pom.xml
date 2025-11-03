@@ -125,10 +125,23 @@
       <version>2.12</version>
     </dependency>
     
+    <!-- JWT Library (Nimbus JOSE + JWT for RSA key handling) -->
+    <dependency>
+      <groupId>com.nimbusds</groupId>
+      <artifactId>nimbus-jose-jwt</artifactId>
+      <version>9.37.3</version>
+    </dependency>
+    
     <!-- Spring Cloud Config Client -->
     <dependency>
       <groupId>org.springframework.cloud</groupId>
       <artifactId>spring-cloud-starter-config</artifactId>
+    </dependency>
+    
+    <!-- Redis for Token Blacklisting and Session Management -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
     </dependency>
     
     <!-- Shared Libraries -->
