@@ -126,10 +126,10 @@
     </dependency>
     
     <!-- JWT Library (Nimbus JOSE + JWT for RSA key handling) -->
+    <!-- Version managed by ecom-bom -->
     <dependency>
       <groupId>com.nimbusds</groupId>
       <artifactId>nimbus-jose-jwt</artifactId>
-      <version>9.37.3</version>
     </dependency>
     
     <!-- Spring Cloud Config Client -->
