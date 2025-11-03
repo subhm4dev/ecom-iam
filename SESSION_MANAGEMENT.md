@@ -45,7 +45,7 @@ Manages sessions using **Redis** for:
 
 ### 2. Logout Flows
 
-#### Single Device Logout (`/api/auth/logout`)
+#### Single Device Logout (`/api/v1/auth/logout`)
 
 ```
 1. Client sends refresh token + access token (optional)
@@ -59,7 +59,7 @@ Manages sessions using **Redis** for:
 - Session timeout (frontend-initiated)
 - User switches accounts
 
-#### All Devices Logout (`/api/auth/logout-all`)
+#### All Devices Logout (`/api/v1/auth/logout-all`)
 
 ```
 1. Client sends access token (authenticated request)
@@ -167,7 +167,7 @@ spring:
 ### Logout (Single Device)
 
 ```bash
-POST /api/auth/logout
+POST /api/v1/auth/logout
 Content-Type: application/json
 Authorization: Bearer <access_token>
 
@@ -179,7 +179,7 @@ Authorization: Bearer <access_token>
 ### Logout All Devices
 
 ```bash
-POST /api/auth/logout-all
+POST /api/v1/auth/logout-all
 Authorization: Bearer <access_token>
 ```
 
@@ -208,7 +208,7 @@ axios.interceptors.response.use(
 ```javascript
 async function logout() {
   // 1. Revoke refresh token
-  await axios.post('/api/auth/logout', {
+  await axios.post('/api/v1/auth/logout', {
     refreshToken: getRefreshToken()
   });
   

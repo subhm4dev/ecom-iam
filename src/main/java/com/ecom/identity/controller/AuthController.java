@@ -40,7 +40,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
 @Tag(name = "Authentication", description = "User authentication and authorization endpoints")
 public class AuthController {

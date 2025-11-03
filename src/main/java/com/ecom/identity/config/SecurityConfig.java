@@ -13,7 +13,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * 
  * <p>Configures security for the Identity service:
  * <ul>
- *   <li>Public endpoints: /api/auth/** (register, login, refresh) and /.well-known/** (JWKS)</li>
+ *   <li>Public endpoints: /api/v1/auth/** (register, login, refresh) and /.well-known/** (JWKS)</li>
  *   <li>Protected endpoints: All other endpoints require authentication</li>
  *   <li>Stateless: No session creation (JWT-based authentication)</li>
  *   <li>CSRF disabled: Stateless JWT auth doesn't need CSRF protection</li>
@@ -37,7 +37,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints (no authentication required)
                 .requestMatchers(
-                    "/api/auth/**",  // All auth endpoints (register, login, refresh, logout)
+                    "/api/v1/auth/**",  // All auth endpoints (register, login, refresh, logout)
                     "/.well-known/**",  // JWKS endpoint
                     "/actuator/health",
                     "/actuator/info",
