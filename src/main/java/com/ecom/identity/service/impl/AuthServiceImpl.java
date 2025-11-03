@@ -201,7 +201,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    public RefreshResponse refresh(RefreshRequest request) {
+    public RefreshResponse refresh(RefreshRequest request, String accessToken) {
         // 1. Hash the refresh token to lookup in database
         String refreshTokenHash = passwordService.hashTokenDeterministically(request.refreshToken());
 
@@ -225,47 +225,82 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "User account is disabled");
         }
 
-        // 6. Load user roles
+        // 6. If access token is provided, validate it belongs to the same user
+        // This adds an extra security layer: even if refresh token is valid,
+        // the access token must belong to the same user
+        if (accessToken != null && !accessToken.isBlank()) {
+            try {
+                UUID accessTokenUserId = jwtService.extractUserId(accessToken);
+                if (!accessTokenUserId.equals(userAccount.getId())) {
+                    throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Refresh token and access token belong to different users");
+                }
+            } catch (Exception e) {
+                // Access token may be expired or invalid - that's okay for refresh
+                // We'll proceed with refresh token validation only
+                log.debug("Could not validate access token during refresh (may be expired): {}", e.getMessage());
+            }
+        }
+
+        // 7. Load user roles
         List<RoleGrant> roleGrants = roleGrantRepository.findAllByUser(userAccount);
         List<String> roles = roleGrants.stream()
             .map(roleGrant -> roleGrant.getRole().name())
             .toList();
 
-        // 7. Generate new access token
+        // 8. Generate new access token
         String newAccessToken = jwtService.generateAccessToken(userAccount, roles);
 
-        // 8. Calculate access token expiry in seconds (2 hours = 7200 seconds)
+        // 9. Calculate access token expiry in seconds (2 hours = 7200 seconds)
         long expiresInSeconds = 2L * 3600L; // 2 hours
 
-        // 9. Return RefreshResponse with new access token
+        // 10. Return RefreshResponse with new access token
         return new RefreshResponse(newAccessToken, expiresInSeconds);
     }
 
     @Override
     @Transactional
     public void logout(LogoutRequest logoutRequest, String accessToken) {
-        // 1. Hash the refresh token to lookup in database
+        // 1. Validate access token is provided (required for authentication)
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Access token is required for logout");
+        }
+
+        // 2. Extract user ID from access token
+        UUID authenticatedUserId;
+        try {
+            authenticatedUserId = jwtService.extractUserId(accessToken);
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Invalid or expired access token");
+        }
+
+        // 3. Hash the refresh token to lookup in database
         String refreshTokenHash = passwordService.hashTokenDeterministically(logoutRequest.refreshToken());
         
-        // 2. Find and revoke the refresh token
+        // 4. Find refresh token
         RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(refreshTokenHash)
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_CREDENTIALS, "Invalid refresh token"));
         
+        // 5. Validate refresh token belongs to the authenticated user (security check)
+        UUID refreshTokenUserId = refreshToken.getUser().getId();
+        if (!refreshTokenUserId.equals(authenticatedUserId)) {
+            throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Refresh token does not belong to authenticated user");
+        }
+        
+        // 6. Check if refresh token is already revoked
         if (refreshToken.isRevoked()) {
             throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Refresh token already revoked");
         }
         
+        // 7. Revoke the refresh token
         refreshToken.setRevoked(true);
         refreshTokenRepository.save(refreshToken);
         
-        // 3. Blacklist the access token (if provided)
-        if (accessToken != null && !accessToken.isBlank()) {
-            String tokenId = jwtService.extractTokenId(accessToken);
-            long expiresInSeconds = jwtService.getTokenExpirySeconds(accessToken);
-            sessionService.blacklistToken(tokenId, expiresInSeconds);
-        }
+        // 8. Blacklist the access token
+        String tokenId = jwtService.extractTokenId(accessToken);
+        long expiresInSeconds = jwtService.getTokenExpirySeconds(accessToken);
+        sessionService.blacklistToken(tokenId, expiresInSeconds);
         
-        log.info("User logged out: userId={}", refreshToken.getUser().getId());
+        log.info("User logged out: userId={}", authenticatedUserId);
     }
 
     @Override

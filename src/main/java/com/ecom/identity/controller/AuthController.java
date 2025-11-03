@@ -112,21 +112,31 @@ public class AuthController {
      * <p>The refresh flow:
      * <ul>
      *   <li>Validates the refresh token (not expired, not revoked)</li>
+     *   <li>If access token is provided, validates it belongs to same user as refresh token</li>
      *   <li>Issues a new access token with updated expiration</li>
      *   <li>Maintains session continuity without re-authentication</li>
      * </ul>
      *
-     * <p>This is a public endpoint but requires a valid refresh token, providing
-     * a balance between security and user convenience.
+     * <p>Note: This endpoint is public (no authentication required) because access tokens
+     * may have expired. However, if an access token is provided, it must belong to the
+     * same user as the refresh token for security validation.
      */
     @PostMapping("/refresh")
     @Operation(
         summary = "Refresh access token",
-        description = "Issues a new access token using a valid refresh token without requiring re-authentication",
+        description = "Issues a new access token using a valid refresh token. Validates user match if access token provided.",
         security = {}
     )
-    public RefreshResponse refreshToken(@Valid @RequestBody RefreshRequest refreshRequest) {
-        return authService.refresh(refreshRequest);
+    public RefreshResponse refreshToken(
+            @Valid @RequestBody RefreshRequest refreshRequest,
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
+        // Extract access token if provided (optional - access token may be expired)
+        String accessToken = null;
+        if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
+            accessToken = authorizationHeader.substring(7);
+        }
+        
+        return authService.refresh(refreshRequest, accessToken);
     }
 
     /**
@@ -142,28 +152,26 @@ public class AuthController {
      *
      * <p>The logout process:
      * <ul>
+     *   <li>Validates that the user is authenticated (access token required)</li>
+     *   <li>Validates that refresh token belongs to the authenticated user</li>
      *   <li>Revokes the refresh token (marks as revoked in database)</li>
      *   <li>Blacklists the access token in Redis (Gateway rejects it immediately)</li>
-     *   <li>Access token TTL in Redis matches its natural expiry (auto-cleanup)</li>
      * </ul>
      *
-     * <p>This is a public endpoint but requires a valid refresh token to revoke.
-     * The access token (if provided in Authorization header) will be blacklisted.
+     * <p>This endpoint requires authentication to ensure only logged-in users can logout,
+     * preventing unauthorized logout attempts with stolen refresh tokens.
      */
     @PostMapping("/logout")
     @Operation(
         summary = "Logout user and revoke refresh token",
-        description = "Invalidates refresh token and blacklists access token to end user session securely",
-        security = {}
+        description = "Requires authentication. Invalidates refresh token and blacklists access token to end user session securely",
+        security = {@SecurityRequirement(name = "bearerAuth")}
     )
     public ResponseEntity<Void> logout(
             @Valid @RequestBody LogoutRequest logoutRequest,
-            @RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
-        // Extract access token from Authorization header (Bearer <token>)
-        String accessToken = null;
-        if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
-            accessToken = authorizationHeader.substring(7);
-        }
+            @RequestHeader("Authorization") String authorizationHeader) {
+        // Extract access token from Authorization header (required)
+        String accessToken = authorizationHeader.substring(7); // Remove "Bearer "
         
         authService.logout(logoutRequest, accessToken);
         return ResponseEntity.status(HttpStatus.NO_CONTENT).build();

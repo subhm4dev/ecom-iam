@@ -26,9 +26,10 @@ public interface AuthService {
      * Refresh access token using refresh token
      * 
      * @param refreshRequest Contains refresh token
+     * @param accessToken Optional access token for validation (may be expired)
      * @return RefreshResponse with new access token
      */
-    RefreshResponse refresh(RefreshRequest refreshRequest);
+    RefreshResponse refresh(RefreshRequest refreshRequest, String accessToken);
     
     /**
      * Logout user by revoking refresh token and blacklisting access token
