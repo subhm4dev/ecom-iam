@@ -37,10 +37,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints (no authentication required)
                 .requestMatchers(
-                    "/api/auth/register",
-                    "/api/auth/login",
-                    "/api/auth/refresh",
-                    "/.well-known/jwks.json",
+                    "/api/auth/**",  // All auth endpoints (register, login, refresh, logout)
+                    "/.well-known/**",  // JWKS endpoint
                     "/actuator/health",
                     "/actuator/info",
                     "/swagger-ui/**",

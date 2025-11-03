@@ -98,13 +98,16 @@ public class PasswordService {
     /**
      * Hash a password with salt and pepper.
      * 
-     * Workaround for explicit salt: Since argon2-jvm doesn't support rawHash() with explicit salt,
-     * we use a workaround: hash with salt included in password input, then extract hash.
-     * Note: This ensures deterministic hashing because same password+pepper+salt always produces same hash.
+     * Architecture:
+     * - Salt: Per-user, stored in DB (explicit control)
+     * - Pepper: Universal, from config/env (server-side secret)
+     * - We combine password+pepper+salt, then hash with Argon2
+     * - Argon2 generates its own internal salt, so we store the FULL formatted hash
+     * - During verification, we use Argon2's verify() method which handles salt extraction
      * 
      * @param password Raw password from user
      * @param saltBase64 Base64-encoded salt (from generateSalt() or database)
-     * @return Base64-encoded hash (extracted from Argon2 formatted string)
+     * @return Full Argon2 formatted hash string (includes Argon2's salt): $argon2id$v=19$m=...$<salt>$<hash>
      */
     public String hashPassword(String password, String saltBase64) {
         if (password == null || password.isEmpty()) {
@@ -115,30 +118,21 @@ public class PasswordService {
         }
 
         // Combine password + pepper + salt
-        // Including salt in input ensures deterministic hashing (same input = same output)
-        // Even though Argon2 generates its own salt, the hash is deterministic for same input
+        // Our salt adds explicit control, pepper adds server-side secret
         String combinedInput = password + pepper + saltBase64;
         char[] passwordChars = combinedInput.toCharArray();
         
         try {
             // Hash with Argon2id
             // Format: $argon2id$v=19$m=<memory>,t=<iterations>,p=<parallelism>$<salt>$<hash>
-            String formattedHash = argon2.hash(
+            // Store the FULL formatted string (includes Argon2's internal salt)
+            return argon2.hash(
                 iterations,
                 memory,
                 parallelism,
                 passwordChars,
                 java.nio.charset.StandardCharsets.UTF_8
             );
-            
-            // Extract hash part from formatted string (last part after '$')
-            String[] parts = formattedHash.split("\\$");
-            if (parts.length < 6) {
-                throw new RuntimeException("Invalid Argon2 hash format: " + formattedHash);
-            }
-            
-            // Return the hash bytes (Base64-encoded)
-            return parts[parts.length - 1];
         } finally {
             // Clean up sensitive data from memory
             argon2.wipeArray(passwordChars);
@@ -148,26 +142,37 @@ public class PasswordService {
     /**
      * Verify a password against a stored hash.
      * 
+     * Uses Argon2's verify() method which:
+     * - Extracts salt from the stored formatted hash
+     * - Hashes the input password with same parameters
+     * - Performs constant-time comparison
+     * 
      * @param rawPassword Password to verify
-     * @param storedHashBase64 Base64-encoded hash from database
-     * @param storedSaltBase64 Base64-encoded salt from database
+     * @param storedFormattedHash Full Argon2 formatted hash from database: $argon2id$v=19$m=...$<salt>$<hash>
+     * @param storedSaltBase64 Base64-encoded salt from database (our explicit salt, included in input)
      * @return true if password matches, false otherwise
      */
-    public boolean verifyPassword(String rawPassword, String storedHashBase64, String storedSaltBase64) {
-        if (rawPassword == null || storedHashBase64 == null || storedSaltBase64 == null) {
+    public boolean verifyPassword(String rawPassword, String storedFormattedHash, String storedSaltBase64) {
+        if (rawPassword == null || storedFormattedHash == null || storedSaltBase64 == null) {
             return false;
         }
 
         try {
-            // Hash the input password with same salt and pepper
-            String computedHashBase64 = hashPassword(rawPassword, storedSaltBase64);
+            // Combine password + pepper + salt (same as during registration)
+            String combinedInput = rawPassword + pepper + storedSaltBase64;
+            char[] passwordChars = combinedInput.toCharArray();
             
-            // Decode both hashes
-            byte[] storedHashBytes = Base64.getDecoder().decode(storedHashBase64);
-            byte[] computedHashBytes = Base64.getDecoder().decode(computedHashBase64);
-            
-            // Constant-time comparison (prevents timing attacks)
-            return MessageDigest.isEqual(storedHashBytes, computedHashBytes);
+            try {
+                // Use Argon2's verify() method which:
+                // 1. Extracts salt from storedFormattedHash
+                // 2. Hashes the input with same parameters
+                // 3. Compares hashes in constant time
+                boolean matches = argon2.verify(storedFormattedHash, passwordChars, java.nio.charset.StandardCharsets.UTF_8);
+                return matches;
+            } finally {
+                // Clean up sensitive data from memory
+                argon2.wipeArray(passwordChars);
+            }
         } catch (Exception e) {
             // Log error but don't reveal details (security best practice)
             return false;

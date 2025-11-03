@@ -1,6 +1,7 @@
 package com.ecom.identity.controller;
 
 import com.ecom.identity.service.AuthService;
+import com.ecom.response.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -167,14 +168,14 @@ public class AuthController {
         description = "Requires authentication. Invalidates refresh token and blacklists access token to end user session securely",
         security = {@SecurityRequirement(name = "bearerAuth")}
     )
-    public ResponseEntity<Void> logout(
+    public ApiResponse<Void> logout(
             @Valid @RequestBody LogoutRequest logoutRequest,
             @RequestHeader("Authorization") String authorizationHeader) {
         // Extract access token from Authorization header (required)
         String accessToken = authorizationHeader.substring(7); // Remove "Bearer "
         
         authService.logout(logoutRequest, accessToken);
-        return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+        return ApiResponse.success(null, "User logged out successfully");
     }
 
     /**
@@ -203,14 +204,14 @@ public class AuthController {
         description = "Revokes all active sessions and tokens for the authenticated user across all devices",
         security = {@SecurityRequirement(name = "bearerAuth")}
     )
-    public ResponseEntity<Void> logoutAll(
+    public ApiResponse<Void> logoutAll(
             @RequestHeader("Authorization") String authorizationHeader) {
         // Extract access token and user info
         String accessToken = authorizationHeader.substring(7); // Remove "Bearer "
         java.util.UUID userId = jwtService.extractUserId(accessToken);
         
         authService.logoutAll(userId, accessToken);
-        return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+        return ApiResponse.success(null, "User logged out successfully from all devices");
     }
 }
 

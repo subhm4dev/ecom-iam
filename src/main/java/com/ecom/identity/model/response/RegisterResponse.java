@@ -8,6 +8,7 @@ import java.util.UUID;
  */
 public record RegisterResponse(
     String token,
+    String refreshToken,
     String id,
     List<String> role,
     String tenantId

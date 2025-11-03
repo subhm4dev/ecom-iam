@@ -3,8 +3,8 @@ package com.ecom.identity.entity;
 import com.ecom.identity.constants.Role;
 import jakarta.persistence.*;
 import lombok.*;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
@@ -27,8 +27,8 @@ public class RoleGrant {
     @JoinColumn(name = "user_id", nullable = false)
     private UserAccount user;
 
-    @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "user_role")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private Role role;
 
     @Column(nullable = false, name = "granted_at", updatable = false)

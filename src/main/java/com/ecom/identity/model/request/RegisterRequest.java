@@ -14,7 +14,14 @@ import java.util.UUID;
  * Registration request DTO
  * 
  * <p>Supports registration with either email OR phone (at least one required).
- * Password, tenantId, and role are mandatory fields.
+ * Password and role are mandatory fields.
+ * 
+ * <p>Tenant ID behavior:
+ * <ul>
+ *   <li><b>CUSTOMER:</b> tenantId is optional. If not provided, user is auto-assigned to default marketplace tenant.</li>
+ *   <li><b>SELLER:</b> tenantId is optional. If not provided, a new tenant is created for the seller.</li>
+ *   <li><b>Other roles:</b> tenantId may be required based on business logic.</li>
+ * </ul>
  */
 @EmailOrPhoneRequired
 public record RegisterRequest(
@@ -28,7 +35,7 @@ public record RegisterRequest(
     @Size(min = 8, message = "Password must be at least 8 characters")
     String password,
     
-    @NotNull(message = "Tenant ID is required")
+    // Tenant ID is optional - will be auto-assigned for customers, auto-created for sellers
     UUID tenantId,
     
     @NotNull(message = "Role is required")

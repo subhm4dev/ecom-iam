@@ -53,16 +53,45 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
-        // 1. Validate tenant exists
-        Tenant tenant = tenantRepository.findById(request.tenantId())
-            .orElseThrow(() -> new BusinessException(ErrorCode.SKU_REQUIRED, "Invalid tenant ID"));
+        // 1. Determine tenant based on role
+        Tenant tenant;
+        UUID tenantId = request.tenantId();
+
+        if (tenantId != null) {
+            // Tenant ID provided - validate it exists
+            tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SKU_REQUIRED, "Invalid tenant ID"));
+        } else {
+            // Tenant ID not provided - auto-assign based on role
+            if (request.role() == com.ecom.identity.constants.Role.CUSTOMER) {
+                // Customers → Default marketplace tenant
+                UUID defaultMarketplaceTenantId = UUID.fromString("00000000-0000-0000-0000-000000000000");
+                tenant = tenantRepository.findById(defaultMarketplaceTenantId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.SKU_REQUIRED,
+                        "Default marketplace tenant not found. Please run database migrations."));
+            } else if (request.role() == com.ecom.identity.constants.Role.SELLER) {
+                // Sellers → Create new tenant
+                tenant = Tenant.builder()
+                    .name("Seller: " + (request.email() != null ? request.email() : request.phone()))
+                    .status(com.ecom.identity.constants.TenantStatus.ACTIVE)
+                    .build();
+                tenant = tenantRepository.save(tenant);
+            } else {
+                // Other roles require explicit tenant ID
+                throw new BusinessException(ErrorCode.SKU_REQUIRED,
+                    "Tenant ID is required for role: " + request.role());
+            }
+        }
+
+        tenantId = tenant.getId(); // Use resolved tenant ID for subsequent checks
 
         // 2. Check email uniqueness within tenant scope
         if (request.email() != null && !request.email().isBlank()) {
+            UUID finalTenantId = tenantId;
             userAccountRepository.findByEmail(request.email())
                 .ifPresent(existing -> {
                     // Check if same tenant (tenant-scoped uniqueness)
-                    if (existing.getTenant().getId().equals(request.tenantId())) {
+                    if (existing.getTenant().getId().equals(finalTenantId)) {
                         throw new BusinessException(ErrorCode.EMAIL_TAKEN, "Email already registered");
                     }
                 });
@@ -70,10 +99,11 @@ public class AuthServiceImpl implements AuthService {
 
         // 3. Check phone uniqueness within tenant scope
         if (request.phone() != null && !request.phone().isBlank()) {
+            UUID finalTenantId1 = tenantId;
             userAccountRepository.findByPhone(request.phone())
                 .ifPresent(existing -> {
                     // Check if same tenant (tenant-scoped uniqueness)
-                    if (existing.getTenant().getId().equals(request.tenantId())) {
+                    if (existing.getTenant().getId().equals(finalTenantId1)) {
                         throw new BusinessException(ErrorCode.PHONE_TAKEN, "Phone already registered");
                     }
                 });
@@ -108,12 +138,12 @@ public class AuthServiceImpl implements AuthService {
         // 8. Generate tokens for auto-login
         List<String> roles = List.of(roleGrant.getRole().name());
         String accessToken = jwtService.generateAccessToken(userAccount, roles);
-        
+
         // 9. Generate and store refresh token
         String refreshTokenString = jwtService.generateRefreshTokenString();
         String refreshTokenHash = passwordService.hashTokenDeterministically(refreshTokenString);
         LocalDateTime refreshTokenExpiresAt = LocalDateTime.now().plusDays(refreshTokenExpiryDays);
-        
+
         RefreshToken refreshToken = RefreshToken.builder()
             .user(userAccount)
             .tokenHash(refreshTokenHash)
@@ -125,6 +155,7 @@ public class AuthServiceImpl implements AuthService {
         // 10. Return response with access token
         return new RegisterResponse(
             accessToken,
+            refreshTokenString, // Return plain refresh token (client stores this), not the hash
             userAccount.getId().toString(),
             roles,
             userAccount.getTenant().getId().toString()
@@ -275,31 +306,31 @@ public class AuthServiceImpl implements AuthService {
 
         // 3. Hash the refresh token to lookup in database
         String refreshTokenHash = passwordService.hashTokenDeterministically(logoutRequest.refreshToken());
-        
+
         // 4. Find refresh token
         RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(refreshTokenHash)
             .orElseThrow(() -> new BusinessException(ErrorCode.BAD_CREDENTIALS, "Invalid refresh token"));
-        
+
         // 5. Validate refresh token belongs to the authenticated user (security check)
         UUID refreshTokenUserId = refreshToken.getUser().getId();
         if (!refreshTokenUserId.equals(authenticatedUserId)) {
             throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Refresh token does not belong to authenticated user");
         }
-        
+
         // 6. Check if refresh token is already revoked
         if (refreshToken.isRevoked()) {
             throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Refresh token already revoked");
         }
-        
+
         // 7. Revoke the refresh token
         refreshToken.setRevoked(true);
         refreshTokenRepository.save(refreshToken);
-        
+
         // 8. Blacklist the access token
         String tokenId = jwtService.extractTokenId(accessToken);
         long expiresInSeconds = jwtService.getTokenExpirySeconds(accessToken);
         sessionService.blacklistToken(tokenId, expiresInSeconds);
-        
+
         log.info("User logged out: userId={}", authenticatedUserId);
     }
 
@@ -312,17 +343,17 @@ public class AuthServiceImpl implements AuthService {
             token.setRevoked(true);
             refreshTokenRepository.save(token);
         });
-        
+
         // 2. Revoke all sessions in Redis (blacklist all access tokens)
         sessionService.revokeAllUserSessions(userId);
-        
+
         // 3. Also blacklist the current access token if provided
         if (accessToken != null && !accessToken.isBlank()) {
             String tokenId = jwtService.extractTokenId(accessToken);
             long expiresInSeconds = jwtService.getTokenExpirySeconds(accessToken);
             sessionService.blacklistToken(tokenId, expiresInSeconds);
         }
-        
+
         log.info("User logged out from all devices: userId={}, sessions={}", userId, userRefreshTokens.size());
     }
 }
