@@ -144,6 +144,12 @@
       <version>0.1.0-SNAPSHOT</version>
     </dependency>
     
+    <dependency>
+      <groupId>com.ecom</groupId>
+      <artifactId>standard-response-starter</artifactId>
+      <version>0.1.0-SNAPSHOT</version>
+    </dependency>
+    
     <!-- Actuator & Monitoring -->
     <!-- Version managed by ecom-bom -->
     <dependency>
@@ -155,6 +161,12 @@
     <dependency>
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
+    
+    <!-- OpenAPI / Swagger UI -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
     </dependency>
     
     <!-- Lombok -->
