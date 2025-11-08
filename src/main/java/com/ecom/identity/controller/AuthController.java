@@ -2,6 +2,8 @@ package com.ecom.identity.controller;
 
 import com.ecom.identity.service.AuthService;
 import com.ecom.identity.service.CookieService;
+import com.ecom.error.exception.BusinessException;
+import com.ecom.error.model.ErrorCode;
 import com.ecom.response.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -283,18 +285,42 @@ public class AuthController {
     @PostMapping("/logout")
     @Operation(
         summary = "Logout user and revoke refresh token",
-        description = "Requires authentication. Invalidates refresh token, blacklists access token, and clears authentication cookies.",
+        description = "Requires authentication. Invalidates refresh token, blacklists access token, and clears authentication cookies. Refresh token can be provided in request body (mobile) or cookie (web).",
         security = {@SecurityRequirement(name = "bearerAuth")}
     )
     public ApiResponse<Void> logout(
-            @Valid @RequestBody LogoutRequest logoutRequest,
+            @RequestBody(required = false) LogoutRequest logoutRequest,
             @RequestHeader("Authorization") String authorizationHeader,
+            @CookieValue(value = "refreshToken", required = false) String refreshTokenCookie,
             HttpServletResponse response) {
         // Extract access token from Authorization header (required)
         String accessToken = authorizationHeader.substring(7); // Remove "Bearer "
         
+        // Get refresh token from request body OR cookies (hybrid approach)
+        // WHAT: Tries request body first, falls back to cookies
+        // HOW: Checks logoutRequest.refreshToken(), then refreshTokenCookie
+        // WHY: Supports both mobile apps (body) and web browsers (cookies)
+        // REAL-WORLD: Web browser → refreshToken in cookie → Backend reads cookie
+        //             Mobile app → refreshToken in body → Backend reads body
+        String refreshToken = null;
+        if (logoutRequest != null && logoutRequest.refreshToken() != null && !logoutRequest.refreshToken().isBlank()) {
+            // Refresh token provided in request body (mobile apps)
+            refreshToken = logoutRequest.refreshToken();
+        } else if (refreshTokenCookie != null && !refreshTokenCookie.isBlank()) {
+            // Refresh token in cookie (web browsers)
+            refreshToken = refreshTokenCookie;
+        }
+        
+        // Validate refresh token is available (from body or cookie)
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new BusinessException(ErrorCode.BAD_CREDENTIALS, "Refresh token is required (provide in request body or cookie)");
+        }
+        
+        // Create LogoutRequest with resolved refresh token
+        LogoutRequest resolvedRequest = new LogoutRequest(refreshToken);
+        
         // Revoke tokens (database + Redis blacklist)
-        authService.logout(logoutRequest, accessToken);
+        authService.logout(resolvedRequest, accessToken);
         
         // Clear authentication cookies
         // WHAT: Removes cookies by setting them to expire immediately
