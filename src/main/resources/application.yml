@@ -47,3 +47,46 @@ logging:
     root: INFO
     com.ecom: DEBUG
 
+# Application environment configuration
+# WHAT: Determines if we're running in development or production
+# HOW: Used by CookieService to set Secure flag (true in production, false in development)
+# WHY: Cookies with Secure=true only work over HTTPS (required in production, breaks localhost HTTP)
+# REAL-WORLD: Local development uses HTTP → Secure=false → Cookies work
+#             Production uses HTTPS → Secure=true → Cookies work and are secure
+app:
+  environment: ${APP_ENVIRONMENT:development} # development or production
+  
+  # Cookie configuration for authentication
+  # WHAT: Settings for httpOnly cookies that store authentication tokens
+  # HOW: Used by CookieService to configure cookie domain, SameSite, etc.
+  # WHY: Different environments (localhost vs Kubernetes) need different cookie settings
+  # REAL-WORLD: Localhost doesn't need domain → Kubernetes needs domain for subdomain sharing
+  cookie:
+    # Cookie domain (for production Kubernetes deployment)
+    # WHAT: Sets which domains can access the cookies
+    # HOW: Browser only sends cookies to matching domains
+    # WHY: Allows cookies to work across subdomains (e.g., api.example.com and www.example.com)
+    # REAL-WORLD: 
+    #   - Localhost: Leave empty (browser handles localhost automatically)
+    #   - Kubernetes: Set to ".example.com" (allows api.example.com, www.example.com to share cookies)
+    #   - Format: ".example.com" (leading dot = all subdomains) or "example.com" (exact domain only)
+    # EXAMPLE: If your API is at api.myapp.com and frontend is at www.myapp.com, set to ".myapp.com"
+    domain: ${APP_COOKIE_DOMAIN:}
+    
+    # SameSite=None for cross-domain scenarios
+    # WHAT: Allows cookies to be sent in cross-site requests
+    # HOW: Sets SameSite=None (requires Secure=true, which requires HTTPS)
+    # WHY: Only needed if frontend and backend are on completely different domains
+    # REAL-WORLD: 
+    #   - Same domain (api.example.com + www.example.com): false (use SameSite=Lax, default)
+    #   - Different domains (api.example.com + frontend.otherdomain.com): true (use SameSite=None)
+    # NOTE: If true, you MUST use HTTPS (Secure=true) and set cookie domain properly
+    same-site-none: ${APP_COOKIE_SAME_SITE_NONE:false}
+
+# JWT token configuration
+jwt:
+  access-token:
+    expiry-hours: 2 # Short-lived for security (auto-refreshed via refresh token)
+  refresh-token:
+    expiry-days: 30 # Long-lived for UX (users stay logged in for 30 days)
+

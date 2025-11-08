@@ -1,13 +1,14 @@
 package com.ecom.identity.controller;
 
 import com.ecom.identity.service.AuthService;
+import com.ecom.identity.service.CookieService;
 import com.ecom.response.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import com.ecom.identity.model.request.LoginRequest;
@@ -46,6 +47,10 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 public class AuthController {
     private final AuthService authService;
     private final JwtService jwtService;
+    private final CookieService cookieService;
+
+    @Value("${jwt.refresh-token.expiry-days:30}")
+    private int refreshTokenExpiryDays;
 
     /**
      * Register a new user account
@@ -58,7 +63,20 @@ public class AuthController {
      *   <li>Checks uniqueness of email/phone within tenant scope</li>
      *   <li>Hashes password using Argon2 with salt+pepper technique</li>
      *   <li>Assigns roles (CUSTOMER, SELLER, etc.) based on tenant context</li>
+     *   <li>Auto-logs in user by generating tokens and setting cookies</li>
      * </ul>
+     *
+     * <p><b>COOKIE HANDLING:</b>
+     * After successful registration, this endpoint sets httpOnly cookies containing
+     * access and refresh tokens. This enables:
+     * - Web browsers to automatically send tokens with requests (no manual header management)
+     * - Mobile apps to receive tokens in response body (same API, different storage)
+     * - Hybrid approach: Web uses cookies, mobile uses Keychain/Keystore
+     * 
+     * <p><b>REAL-WORLD SCENARIO:</b>
+     * User fills registration form → Submits → Backend creates account → 
+     * Backend generates tokens → Backend sets cookies → User is automatically logged in →
+     * Browser stores cookies → Next API call includes cookies automatically → User authenticated
      *
      * <p>This is a public endpoint (no authentication required) as it's the entry point
      * for new users to join the platform.
@@ -66,11 +84,33 @@ public class AuthController {
     @PostMapping("/register")
     @Operation(
         summary = "Register a new user account",
-        description = "Creates a new user account with email or phone authentication. Supports multi-tenant registration.",
+        description = "Creates a new user account with email or phone authentication. Supports multi-tenant registration. Auto-logs in user and sets authentication cookies.",
         security = {}
     )
-    public RegisterResponse register(@Valid @RequestBody RegisterRequest registerRequest) {
-        return authService.register(registerRequest);
+    public RegisterResponse register(
+            @Valid @RequestBody RegisterRequest registerRequest,
+            HttpServletResponse response) {
+        
+        // Register user and get tokens (auto-login after registration)
+        RegisterResponse registerResponse = authService.register(registerRequest);
+        
+        // Set authentication cookies for web browsers
+        // WHAT: Creates httpOnly cookies with access and refresh tokens
+        // HOW: CookieService sets cookies in response headers
+        // WHY: Web browsers automatically send cookies with requests (better UX, more secure)
+        // REAL-WORLD: User registers → Cookies set → Browser stores them → User stays logged in
+        // NOTE: Mobile apps ignore cookies and use tokens from response body (stored in Keychain/Keystore)
+        cookieService.setAuthCookies(
+            response,
+            registerResponse.token(), // Access token (RegisterResponse uses "token" field name)
+            registerResponse.refreshToken(),
+            2L * 3600L, // Access token expiry: 2 hours (7200 seconds)
+            refreshTokenExpiryDays // Refresh token expiry: 30 days (from config)
+        );
+        
+        // Return response with tokens (for mobile apps and backward compatibility)
+        // Web browsers will use cookies, mobile apps will use response body
+        return registerResponse;
     }
 
     /**
@@ -84,10 +124,22 @@ public class AuthController {
      * <ul>
      *   <li>Accepts email OR phone along with password</li>
      *   <li>Validates credentials using PasswordService.matches()</li>
-     *   <li>Generates short-lived access token (15 min) via JwtService</li>
-     *   <li>Generates long-lived refresh token (7 days) for session extension</li>
-     *   <li>Returns tokens to client for subsequent API calls</li>
+     *   <li>Generates short-lived access token (2 hours) via JwtService</li>
+     *   <li>Generates long-lived refresh token (30 days) for session extension</li>
+     *   <li>Sets httpOnly cookies with tokens (for web browsers)</li>
+     *   <li>Returns tokens in response body (for mobile apps and backward compatibility)</li>
      * </ul>
+     *
+     * <p><b>COOKIE HANDLING:</b>
+     * This endpoint sets httpOnly cookies containing access and refresh tokens.
+     * - <b>Web browsers:</b> Cookies are automatically sent with requests (no manual header management)
+     * - <b>Mobile apps:</b> Ignore cookies, use tokens from response body (store in Keychain/Keystore)
+     * - <b>Hybrid approach:</b> Same API works for both web and mobile, each uses appropriate storage
+     * 
+     * <p><b>REAL-WORLD SCENARIO:</b>
+     * User enters credentials → Clicks "Login" → Backend validates → 
+     * Backend generates tokens → Backend sets cookies → User is logged in →
+     * Browser stores cookies → Next API call automatically includes cookies → Gateway validates → User authenticated
      *
      * <p>Gateway validates the returned access token for all downstream service calls.
      * This endpoint is public (no authentication required) as it's the entry point
@@ -96,11 +148,33 @@ public class AuthController {
     @PostMapping("/login")
     @Operation(
         summary = "Authenticate user and get JWT tokens",
-        description = "Validates user credentials and returns access token + refresh token for API authentication",
+        description = "Validates user credentials and returns access token + refresh token. Sets httpOnly cookies for web browsers.",
         security = {}
     )
-    public LoginResponse login(@Valid @RequestBody LoginRequest loginRequest) {
-        return authService.login(loginRequest);
+    public LoginResponse login(
+            @Valid @RequestBody LoginRequest loginRequest,
+            HttpServletResponse response) {
+        
+        // Authenticate user and get tokens
+        LoginResponse loginResponse = authService.login(loginRequest);
+        
+        // Set authentication cookies for web browsers
+        // WHAT: Creates httpOnly cookies with access and refresh tokens
+        // HOW: CookieService sets cookies in response headers
+        // WHY: Web browsers automatically send cookies with requests (better UX, more secure than localStorage)
+        // REAL-WORLD: User logs in → Cookies set → Browser stores them → User stays logged in for 30 days
+        // NOTE: Mobile apps ignore cookies and use tokens from response body (stored in Keychain/Keystore)
+        cookieService.setAuthCookies(
+            response,
+            loginResponse.accessToken(),
+            loginResponse.refreshToken(),
+            loginResponse.expiresIn(), // Access token expiry in seconds (from service)
+            refreshTokenExpiryDays // Refresh token expiry: 30 days (from config)
+        );
+        
+        // Return response with tokens (for mobile apps and backward compatibility)
+        // Web browsers will use cookies, mobile apps will use response body
+        return loginResponse;
     }
 
     /**
@@ -115,8 +189,20 @@ public class AuthController {
      *   <li>Validates the refresh token (not expired, not revoked)</li>
      *   <li>If access token is provided, validates it belongs to same user as refresh token</li>
      *   <li>Issues a new access token with updated expiration</li>
+     *   <li>Updates access token cookie (refresh token cookie remains unchanged)</li>
      *   <li>Maintains session continuity without re-authentication</li>
      * </ul>
+     *
+     * <p><b>COOKIE HANDLING:</b>
+     * When refresh succeeds, this endpoint updates the access token cookie with the new token.
+     * The refresh token cookie remains unchanged (it's long-lived, 30 days).
+     * - <b>Web browsers:</b> Cookie is automatically updated, browser sends new token with next request
+     * - <b>Mobile apps:</b> Ignore cookies, use new access token from response body
+     * 
+     * <p><b>REAL-WORLD SCENARIO:</b>
+     * Access token expires (2 hours) → Frontend calls refresh endpoint →
+     * Backend validates refresh token → Backend issues new access token →
+     * Backend updates access token cookie → User continues using app without re-login
      *
      * <p>Note: This endpoint is public (no authentication required) because access tokens
      * may have expired. However, if an access token is provided, it must belong to the
@@ -125,19 +211,39 @@ public class AuthController {
     @PostMapping("/refresh")
     @Operation(
         summary = "Refresh access token",
-        description = "Issues a new access token using a valid refresh token. Validates user match if access token provided.",
+        description = "Issues a new access token using a valid refresh token. Updates access token cookie for web browsers.",
         security = {}
     )
     public RefreshResponse refreshToken(
             @Valid @RequestBody RefreshRequest refreshRequest,
-            @RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
+            @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            HttpServletResponse response) {
         // Extract access token if provided (optional - access token may be expired)
         String accessToken = null;
         if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
             accessToken = authorizationHeader.substring(7);
         }
         
-        return authService.refresh(refreshRequest, accessToken);
+        // Refresh token and get new access token
+        RefreshResponse refreshResponse = authService.refresh(refreshRequest, accessToken);
+        
+        // Update access token cookie with new token
+        // WHAT: Updates the access token cookie (refresh token cookie stays the same)
+        // HOW: CookieService sets new cookie with updated access token
+        // WHY: Web browsers need updated cookie to send new token with next request
+        // REAL-WORLD: Token expires → Refresh called → New token generated → Cookie updated → User continues
+        // NOTE: We need the refresh token from the request to update both cookies
+        // Since refresh token doesn't change, we use the one from the request
+        cookieService.setAuthCookies(
+            response,
+            refreshResponse.accessToken(), // New access token
+            refreshRequest.refreshToken(), // Same refresh token (unchanged)
+            refreshResponse.expiresIn(), // New access token expiry: 2 hours
+            refreshTokenExpiryDays // Refresh token expiry: 30 days (unchanged)
+        );
+        
+        // Return response with new access token (for mobile apps and backward compatibility)
+        return refreshResponse;
     }
 
     /**
@@ -157,7 +263,19 @@ public class AuthController {
      *   <li>Validates that refresh token belongs to the authenticated user</li>
      *   <li>Revokes the refresh token (marks as revoked in database)</li>
      *   <li>Blacklists the access token in Redis (Gateway rejects it immediately)</li>
+     *   <li>Clears authentication cookies (browser removes them automatically)</li>
      * </ul>
+     *
+     * <p><b>COOKIE HANDLING:</b>
+     * After revoking tokens, this endpoint clears authentication cookies by setting
+     * them to expire immediately. The browser will automatically delete these cookies.
+     * - <b>Web browsers:</b> Cookies are deleted, user is logged out immediately
+     * - <b>Mobile apps:</b> Ignore cookies, tokens are revoked server-side (app should clear local storage)
+     * 
+     * <p><b>REAL-WORLD SCENARIO:</b>
+     * User clicks "Logout" → Backend revokes tokens → Backend clears cookies →
+     * Browser deletes cookies → Next request has no cookies → User is not authenticated →
+     * User is redirected to login page
      *
      * <p>This endpoint requires authentication to ensure only logged-in users can logout,
      * preventing unauthorized logout attempts with stolen refresh tokens.
@@ -165,16 +283,26 @@ public class AuthController {
     @PostMapping("/logout")
     @Operation(
         summary = "Logout user and revoke refresh token",
-        description = "Requires authentication. Invalidates refresh token and blacklists access token to end user session securely",
+        description = "Requires authentication. Invalidates refresh token, blacklists access token, and clears authentication cookies.",
         security = {@SecurityRequirement(name = "bearerAuth")}
     )
     public ApiResponse<Void> logout(
             @Valid @RequestBody LogoutRequest logoutRequest,
-            @RequestHeader("Authorization") String authorizationHeader) {
+            @RequestHeader("Authorization") String authorizationHeader,
+            HttpServletResponse response) {
         // Extract access token from Authorization header (required)
         String accessToken = authorizationHeader.substring(7); // Remove "Bearer "
         
+        // Revoke tokens (database + Redis blacklist)
         authService.logout(logoutRequest, accessToken);
+        
+        // Clear authentication cookies
+        // WHAT: Removes cookies by setting them to expire immediately
+        // HOW: CookieService sets cookies with MaxAge=0
+        // WHY: Browser needs to be told to delete cookies (server-side revocation isn't enough)
+        // REAL-WORLD: User logs out → Cookies deleted → Next request has no cookies → User not authenticated
+        cookieService.clearAuthCookies(response);
+        
         return ApiResponse.success(null, "User logged out successfully");
     }
 
@@ -194,23 +322,47 @@ public class AuthController {
      *   <li>Revokes all refresh tokens for the user (database)</li>
      *   <li>Blacklists all access tokens in Redis</li>
      *   <li>Clears all session tracking for the user</li>
+     *   <li>Clears authentication cookies on current device (browser removes them)</li>
      * </ul>
+     *
+     * <p><b>COOKIE HANDLING:</b>
+     * After revoking all tokens, this endpoint also clears cookies on the current device.
+     * Other devices' cookies remain until they try to use revoked tokens (then they'll be rejected).
+     * - <b>Web browsers:</b> Current device's cookies are deleted immediately
+     * - <b>Other devices:</b> Cookies remain but tokens are revoked (next request will fail)
+     * - <b>Mobile apps:</b> Ignore cookies, tokens are revoked server-side (app should clear local storage)
+     * 
+     * <p><b>REAL-WORLD SCENARIO:</b>
+     * User suspects account hack → Clicks "Logout from all devices" →
+     * Backend revokes all tokens → Backend clears current device cookies →
+     * All devices logged out → User must login again on all devices
      *
      * <p>This endpoint requires authentication (user must be logged in to logout everywhere).
      */
     @PostMapping("/logout-all")
     @Operation(
         summary = "Logout from all devices",
-        description = "Revokes all active sessions and tokens for the authenticated user across all devices",
+        description = "Revokes all active sessions and tokens for the authenticated user across all devices. Clears cookies on current device.",
         security = {@SecurityRequirement(name = "bearerAuth")}
     )
     public ApiResponse<Void> logoutAll(
-            @RequestHeader("Authorization") String authorizationHeader) {
+            @RequestHeader("Authorization") String authorizationHeader,
+            HttpServletResponse response) {
         // Extract access token and user info
         String accessToken = authorizationHeader.substring(7); // Remove "Bearer "
         java.util.UUID userId = jwtService.extractUserId(accessToken);
         
+        // Revoke all tokens (database + Redis blacklist)
         authService.logoutAll(userId, accessToken);
+        
+        // Clear authentication cookies on current device
+        // WHAT: Removes cookies by setting them to expire immediately
+        // HOW: CookieService sets cookies with MaxAge=0
+        // WHY: Current device needs cookies cleared (other devices' cookies remain but tokens are revoked)
+        // REAL-WORLD: User logs out from all → Current device cookies deleted → Other devices' tokens revoked →
+        // Other devices will fail on next request → User must login again everywhere
+        cookieService.clearAuthCookies(response);
+        
         return ApiResponse.success(null, "User logged out successfully from all devices");
     }
 }
